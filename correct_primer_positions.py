@@ -15,8 +15,6 @@ import pandas as pd
 from sys import argv
 import os.path
 
-# adjusted code from https://www.geeksforgeeks.org/reverse-complement-of-dna-strand-using-python/
-
 def verify(sequence):
 	'''This code verifies if a sequence is a DNA'''
 
@@ -31,42 +29,27 @@ def verify(sequence):
 	else:
 		return "Invalid DNA sequence"
 
-
 def rev_comp_if(seq):
+# adjusted code from https://www.geeksforgeeks.org/reverse-complement-of-dna-strand-using-python/
 	comp = []
 	if verify(seq) == "DNA":
 		for base in seq:
-			if base == "A":
-				comp.append("T")
-			elif base == "G":
-				comp.append("C")
-			elif base == "T":
-				comp.append("A")
-			elif base == "C":
-				comp.append("G")
+			if base == "A": comp.append("T")
+			elif base == "G": comp.append("C")
+			elif base == "T": comp.append("A")
+			elif base == "C": comp.append("G")
 			### mask ambigious bases with N
-			elif base == "Y":
-				comp.append("N")
-			elif base == "R":
-				comp.append("N")
-			elif base == "S":
-				comp.append("N")
-			elif base == "W":
-				comp.append("N")
-			elif base == "K":
-				comp.append("N")
-			elif base == "M":
-				comp.append("N")
-			elif base == "B":
-				comp.append("N")
-			elif base == "D":
-				comp.append("N")
-			elif base == "H":
-				comp.append("N")
-			elif base == "V":
-				comp.append("N")
-			elif base == "N":
-				comp.append("N")
+			elif base == "Y": comp.append("N")
+			elif base == "R": comp.append("N")
+			elif base == "S": comp.append("N")
+			elif base == "W": comp.append("N")
+			elif base == "K": comp.append("N")
+			elif base == "M": comp.append("N")
+			elif base == "B": comp.append("N")
+			elif base == "D": comp.append("N")
+			elif base == "H": comp.append("N")
+			elif base == "V": comp.append("N")
+			elif base == "N": comp.append("N")
 	else:
 		return "Invalid DNA Sequence"
 
@@ -149,7 +132,7 @@ def main(argv):
             primer_bed_df.iloc[:,2] = e_pos
 
             primer_bed_df.to_csv(os.path.dirname(argv[3])+'/'+os.path.basename(argv[3])+'.position.corrected.bed', index=False, sep='\t', header=False)
-            print("primer.bed file has been updated. See *.position.corrected.bed file.")
+            print("primer.bed file has been updated. See "+os.path.dirname(argv[3])+'/'+os.path.basename(argv[3])+'.position.corrected.bed')
         except Exception as e:  # pragma: nocover
             return "An error has occured: " + str(e)
 if __name__ == "__main__":  # pragma: nocover
