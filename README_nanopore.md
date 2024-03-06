@@ -1,18 +1,50 @@
 # SETUP
 
 ```bash
-WORKDIR=/home/namuun/Documents/Polio_Nanopore_Analysis
-FASTQ=/home/namuun/Documents/CoVpipe_Polio/data/230215_GI1-3_Run23-044/kreibichj
-REF=/home/namuun/Documents/Polio_Nanopore_Analysis/Referenz_poliovirus_Sabin_1_converted.fasta
-PRIMER=/home/namuun/Downloads/Poliovirus_1/results/polio/final_primers/0_aligned_consensus_masked/primer_polioS1.bed
-GFF=$WORKDIR/genes.gff
-# 0_aligned_consensus_masked.fasta_1000.primer.bed
-# primer_polioS1.bed
+srun --cpus-per-task=4 --mem=50GB --gres=local:30 --gpus=1 --pty --time=03:00:00 bash -i
 
-KRAKENDB=/home/namuun/Documents/Polio_Nanopore_Analysis/minikraken_20141208/database.kdb.tar.gz
+WORKDIR=/scratch/projekte/MF1_Bioinformatics/poliovirus-primer-evaluation/Nanopore_analysis_updated_primer
+FASTQ=/scratch/projekte/MF1_Bioinformatics/poliovirus-primer-evaluation/data/2023-08-18-PolioPrimer-ONT-runID114
+
+REF=/scratch/projekte/MF1_Bioinformatics/poliovirus-primer-evaluation/References/Referenz_Poliovirus_Sabin_1.fasta
+REF2=/scratch/projekte/MF1_Bioinformatics/poliovirus-primer-evaluation/References/Referenz_Poliovirus_Sabin_2.fasta
+REF3=/scratch/projekte/MF1_Bioinformatics/poliovirus-primer-evaluation/References/Referenz_Poliovirus_Sabin_3.fasta
+REF123=/scratch/projekte/MF1_Bioinformatics/poliovirus-primer-evaluation/References/Referenz_Poliovirus_Sabin_1_2_3.fasta
+PRIMER=/scratch/projekte/MF1_Bioinformatics/poliovirus-primer-evaluation/primer/polio1/primer_polioS1.bed
+PRIMER2=/scratch/projekte/MF1_Bioinformatics/poliovirus-primer-evaluation/primer/polio2/primer_polioS2.bed
+PRIMER3=/scratch/projekte/MF1_Bioinformatics/poliovirus-primer-evaluation/primer/polio3/primer_polioS3.bed
+
 ```
 
-# prepare reads, 2 samples each 2 seqs
+# unzip fastq files
+```bash
+#!/bin/sh
+for zip in *fastq_pass.zip
+do
+  dirname=`echo $zip | sed 's/\.zip$/_barcode0/'`
+  if mkdir "$dirname"
+  then
+    if cd "$dirname"
+    then
+      unzip ../"$zip"
+      cd ..
+      # rm -f $zip # Uncomment to delete the original zip file
+    else
+      echo "Could not unpack $zip - cd failed"
+    fi
+  else
+    echo "Could not unpack $zip - mkdir failed"
+  fi
+done
+```
+
+# prepare reads,  samples
+```bash
+for READS in $FASTQ/*fastq_pass; do BN=$(basename $READS); cat $READS/*.fastq.gz > $BN.fastq.gz; done
+```
+
+
+# prepare reads, 2 samples each 2 seqs for preliminary analysis
 ```bash
 for READS in $FASTQ/barcode*; do BN=$(basename $READS); cat $READS/*.fastq.gz > $BN.fastq.gz; done
 
@@ -24,42 +56,118 @@ cat barcode23_SiB_153_23-01717.fastq.gz barcode24_SiB_154_23-01718.fastq.gz > Si
 
 ```bash
 cd Filtlong
+conda activate filtlong
 
-for READS in $WORKDIR/*.fastq.gz; do
-    bin/filtlong -a $REF --min_length 100 --keep_percent 90 --trim $READS | gzip > $(basename $READS .fastq.gz).filtered.fastq.gz
+for READS in $WORKDIR/fastq_barcode_merged/*.fastq.gz; do
+    bin/filtlong -a $REF --min_length 100 --keep_percent 90 --trim $READS | gzip > $WORKDIR/fastq_barcode_merged/$(basename $READS .fastq.gz).filtered.fastq.gz
 done
 
-# bin/filtlong -a $REF --min_length 100 --keep_percent 90 --trim /home/namuun/Documents/Polio_Nanopore_Analysis/SiB_151_152_23-0716.fastq.gz | gzip > SiB_151_152_23-0716_filtered.fastq.gz
+#  Anylysis run with corrected bed positions
+RAWFASTQ=/scratch/projekte/MF1_Bioinformatics/poliovirus-primer-evaluation/Nanopore_analysis/fastq_barcode_merged
 
-# bin/filtlong -a $REF --min_length 100 --keep_percent 90 --trim /home/namuun/Documents/Polio_Nanopore_Analysis/SiB_151_152_23-0716.fastq.gz | gzip > SiB_151_152_23-0716_filtered.fastq.gz
+for READS in $RAWFASTQ/run_polio1/*fastq_pass.fastq.gz; do
+    bin/filtlong -a $REF --min_length 500 --keep_percent 90 --trim $READS | gzip > $WORKDIR/data_preprocessing/Polio1/$(basename $READS).filtered.fastq.gz
+done
+
+for READS in $RAWFASTQ/run_polio2/*fastq_pass.fastq.gz; do
+    bin/filtlong -a $REF2 --min_length 500 --keep_percent 90 --trim $READS | gzip > $WORKDIR/data_preprocessing/Polio2/$(basename $READS).filtered.fastq.gz
+done
+
+for READS in $RAWFASTQ/run_polio3/*fastq_pass.fastq.gz; do
+    bin/filtlong -a $REF3 --min_length 500 --keep_percent 90 --trim $READS | gzip > $WORKDIR/data_preprocessing/Polio3/$(basename $READS).filtered.fastq.gz
+done
+
+### Filtering with Chopper to try out filtering with different QC scores in order to check if it impacts any of the known coverage drops such as ~3k region and ~5.5-6k region in PV1
+conda activate chopper
+
+for READS in $RAWFASTQ/run_polio1/*fastq_pass.fastq.gz; do
+    gunzip -c $READS | chopper -q 20 -l 500 | gzip > $WORKDIR/data/Polio1/$(basename $READS).filtered.fastq.gz
+done
+
+for READS in $RAWFASTQ/run_polio2/*fastq_pass.fastq.gz; do
+    gunzip -c $READS | chopper -q 20 -l 500 | gzip > $WORKDIR/data/Polio2/$(basename $READS).filtered.fastq.gz
+done
+
+for READS in $RAWFASTQ/run_polio3/*fastq_pass.fastq.gz; do
+    gunzip -c $READS | chopper -q 20 -l 500 | gzip > $WORKDIR/data/Polio3/$(basename $READS).filtered.fastq.gz
+done
 ```
+
 
 # Map the filtered reads to a reference genome
+# before this step manually sort samples into separate directories for different references
 ```bash
 conda activate minimap2
+cd /scratch/projekte/MF1_Bioinformatics/poliovirus-primer-evaluation/Nanopore_analysis/minimap2/minimap2-2.26_x64-linux
 
-for READS in /home/namuun/Documents/Polio_Nanopore_Analysis/*.fastq.gz; do
-    minimap2 -ax map-ont $REF $READS > $(basename $READS .fastq.gz).sam
-    samtools view -bS $(basename $READS .fastq.gz).sam | samtools sort - -@ 2 -o $(basename $READS .fastq.gz).sorted.bam
-    samtools index $(basename $READS .fastq.gz).sorted.bam
+# Analysis run with updated Primer 
+for READS in $WORKDIR/data_preprocessing/Polio1/*.filtered.fastq.gz; do
+    ./minimap2 -ax map-ont $REF $READS > $WORKDIR/data_preprocessing/Polio1/$(basename $READS).sam
+    samtools view -bS $WORKDIR/data_preprocessing/Polio1/$(basename $READS).sam | samtools sort - -@ 2 -o $WORKDIR/data_preprocessing/Polio1/$(basename $READS).sorted.bam
+    samtools index $WORKDIR/data_preprocessing/Polio1/$(basename $READS).sorted.bam
+done
+
+for READS in $WORKDIR/data_preprocessing/Polio2/*.filtered.fastq.gz; do
+    ./minimap2 -ax map-ont $REF2 $READS > $WORKDIR/data_preprocessing/Polio2/$(basename $READS).sam
+    samtools view -bS $WORKDIR/data_preprocessing/Polio2/$(basename $READS).sam | samtools sort - -@ 2 -o $WORKDIR/data_preprocessing/Polio2/$(basename $READS).sorted.bam
+    samtools index $WORKDIR/data_preprocessing/Polio2/$(basename $READS).sorted.bam
+done
+
+for READS in $WORKDIR/data_preprocessing/Polio3/*.filtered.fastq.gz; do
+    ./minimap2 -ax map-ont $REF3 $READS > $WORKDIR/data_preprocessing/Polio3/$(basename $READS).sam
+    samtools view -bS $WORKDIR/data_preprocessing/Polio3/$(basename $READS).sam | samtools sort - -@ 2 -o $WORKDIR/data_preprocessing/Polio3/$(basename $READS).sorted.bam
+    samtools index $WORKDIR/data_preprocessing/Polio3/$(basename $READS).sorted.bam
 done
 
 ```
 
-# Primer clippping
+# Primer clippping for preliminary analysis
 
 ```bash
-for BAMF in $WORKDIR/*.sorted.bam; do
-    samtools ampliconclip -b $PRIMER --strand --both-ends $BAMF -o $(basename $BAMF).clipped.bam | tee $(basename $BAMF).samtools.log
-    samtools sort $(basename $BAMF).clipped.bam > $(basename $BAMF ).clipped.sort.bam
-    samtools index $(basename $BAMF ).clipped.sort.bam
-    samtools fastq $(basename $BAMF ).clipped.sort.bam > $(basename $BAMF ).clipped.sort.bam.fastq
+conda activate sambcfenv
+
+for BAMF in $PWD/*.sorted.bam; do
+    samtools ampliconclip -b $PRIMER2 --strand --both-ends $BAMF -o $(basename $BAMF).clipped.bam | tee $(basename $BAMF).samtools.log
+    samtools sort $(basename $BAMF).clipped.bam > $(basename $BAMF).clipped.sort.bam
+    samtools index $(basename $BAMF).clipped.sort.bam
+    samtools fastq $(basename $BAMF).clipped.sort.bam > $(basename $BAMF).clipped.sort.bam.fastq
 done
-    
+
+for BAMF in $PWD/*.sorted.bam; do
+    samtools ampliconclip -b $PRIMER2 --strand --both-ends --clipped $BAMF -o $PWD/ampliconclip/$(basename $BAMF).clipped.bam | tee $PWD/ampliconclip/$(basename $BAMF).samtools.log
+    samtools sort $PWD/ampliconclip/$(basename $BAMF).clipped.bam > $PWD/ampliconclip/$(basename $BAMF).clipped.sort.bam
+    samtools index $PWD/ampliconclip/$(basename $BAMF).clipped.sort.bam
+    samtools fastq $PWD/ampliconclip/$(basename $BAMF).clipped.sort.bam > $PWD/ampliconclip/$(basename $BAMF).clipped.sort.bam.fastq
+done 
 # bamclipper.sh -b /home/namuun/Documents/Polio_Nanopore_Analysis/SiB_151_152_23-0716_filtered.sorted.bam -p $PRIMER
 ```
 
-# check primer clipping
+# Primer clipping with iVAR for 2nd analysis with updated primer 
+```bash
+conda activate ivar
+
+for BAMF in $PWD/*.sorted.bam; do     
+    ivar trim -b $PRIMER -p $(basename $BAMF).clipped -m 0 -q 0 -i $BAMF 
+    samtools sort $(basename $BAMF).clipped.bam > $(basename $BAMF).clipped.sort.bam
+    samtools index $(basename $BAMF).clipped.sort.bam
+done
+cd Polio2
+for BAMF in $PWD/*.sorted.bam; do     
+    ivar trim -b $PRIMER2 -p $(basename $BAMF).clipped -m 0 -q 0 -i $BAMF 
+    samtools sort $(basename $BAMF).clipped.bam > $(basename $BAMF).clipped.sort.bam
+    samtools index $(basename $BAMF).clipped.sort.bam
+done
+cd ..
+cd Polio3
+for BAMF in $PWD/*.sorted.bam; do     
+    ivar trim -b $PRIMER3 -p $(basename $BAMF).clipped -m 0 -q 0 -i $BAMF 
+    samtools sort $(basename $BAMF).clipped.bam > $(basename $BAMF).clipped.sort.bam
+    samtools index $(basename $BAMF).clipped.sort.bam
+done
+
+```
+
+#### check primer clipping
 ```bash
 for BAMF in $PWD/*.fastq; do
     while read line ; do
@@ -70,49 +178,87 @@ for BAMF in $PWD/*.fastq; do
 done
 ```
 
+# Run BAMdash for Coverage Plots 
+## -r AY184219 for Polio1; -r AY184220 for Polio 2; -r AY184221 for Polio 3
+```bash
+conda activate BAMdash
+
+# Analysis 2nd run with updated primer
+for BAMF in $WORKDIR/data_preprocessing/Polio1/*.clipped.sort.bam; do
+  bamdash -b $BAMF -r AY184219 && mv *_plot.html $(basename $BAMF).html 
+done
+cd ..
+cd Polio2
+for BAMF in $WORKDIR/data_preprocessing/Polio2/*.clipped.sort.bam; do
+  bamdash -b $BAMF -r AY184220 && mv *_plot.html $(basename $BAMF).html 
+done
+cd ..
+cd Polio3
+for BAMF in $WORKDIR/data_preprocessing/Polio3/*.clipped.sort.bam; do
+  bamdash -b $BAMF -r AY184221 && mv *_plot.html $(basename $BAMF).html 
+done
+
+# Piranha BAM
+PIRANHA_OUTDIR=/scratch/projekte/MF1_Bioinformatics/poliovirus-primer-evaluation/Nanopore_analysis/piranha_run/analysis_with_ref123_2023-11-09
+for line in $PIRANHA_OUTDIR/barcode*/reference_analysis/AY184221/medaka_haploid_variant/*.bam; do
+    html_name=$(echo  $(dirname $line) | cut -d'/' -f9)
+    tab3=$(echo  $(dirname $line) | cut -d'/' -f11)
+    bamdash -b $line -r AY184221 && mv *_plot.html "$html_name"_"$tab3".html"" 
+done
+```
 
 # Variant calling with basecall_model_version_id=dna_r1041_e82_260bps_sup@v3.5.2
 # Run Medaka
 # ATTENTION: it is always good to assign an appropriate Medaka model based on the performed basecalling! 
 ```bash
-
-for READS in $WORKDIR/samtools_ampliconclip_both_ends/*.sort.bam; do
-    medaka consensus $READS --model r1041_e82_260bps_sup_v4.0.0 --threads 2 $(basename $READS .output_consensus).hdf;
-    medaka snp $REF $(basename $READS .output_consensus).hdf $(basename $READS ).snp.vcf --verbose --threshold 0.1;       
+conda activate medaka
+for READS in $WORKDIR/fastq_barcode_merged/run_polio3/*.sort.bam; do
+    medaka consensus $READS --model r1041_e82_400bps_sup_v4.0.0 --threads 2 $(basename $READS .output_consensus).hdf;
+    medaka snp $REF3 $(basename $READS .output_consensus).hdf $(basename $READS ).snp.vcf --verbose --threshold 0.1;       
 done
 
-for READS in $WORKDIR/samtools_ampliconclip_both_ends/*.sort.bam; do
-    medaka consensus $READS --model r1041_e82_260bps_sup_g632 --threads 2 $(basename $READS .output_consensus).hdf;
-    medaka snp $REF $(basename $READS .output_consensus).hdf $(basename $READS ).snp.vcf --verbose --threshold 0.1;       
+for READS in $PWD/*.sort.bam; do
+    medaka consensus $READS --model r1041_e82_400bps_sup_v4.0.0 --threads 2 $(basename $READS .output_consensus).hdf;
+    medaka snp $REF2 $(basename $READS .output_consensus).hdf $(basename $READS ).snp.vcf --verbose --threshold 0.1;       
 done
 
-for READS in $WORKDIR/samtools_ampliconclip_both_ends/*.sort.bam; do
-    medaka consensus $READS --model r1041_e82_260bps_sup_v4.1.0 --threads 2 $(basename $READS .output_consensus).hdf;
-    medaka snp $REF $(basename $READS .output_consensus).hdf $(basename $READS ).snp.vcf --verbose --threshold 0.1;       
+### 2nd run with corrected primer bed 
+for READS in $WORKDIR/data_preprocessing/Polio2/*.sort.bam; do
+    medaka_consensus -i $READS -d $REF2 -m r1041_e82_400bps_sup_v4.0.0 -t 2 -o $(basename $READS);
+    # medaka snp $REF $(basename $READS).hdf $(basename $READS).snp.vcf --verbose --threshold 0.1;       
 done
 
-for READS in $WORKDIR/samtools_ampliconclip_both_ends/*.sort.bam; do
-    medaka consensus $READS --model r1041_e82_260bps_sup_variant_v4.1.0 --threads 2 $(basename $READS .output_consensus).hdf;
-    medaka snp $REF $(basename $READS .output_consensus).hdf $(basename $READS ).snp.vcf --verbose --threshold 0.1;       
+for READS in $WORKDIR/data_preprocessing/Polio2/*.sort.bam; do
+    medaka consensus $READS --model r1041_e82_400bps_sup_v4.0.0 --threads 2 $(basename $READS).hdf;
+    medaka snp $REF2 $(basename $READS).hdf $(basename $READS).snp.vcf --verbose --threshold 0.1;       
 done
 
-for READS in $WORKDIR/samtools_ampliconclip_both_ends/*.sort.bam; do
-    medaka consensus $READS --model r1041_e82_260bps_sup_variant_g632 --threads 2 $(basename $READS .output_consensus).hdf;
-    medaka snp $REF $(basename $READS .output_consensus).hdf $(basename $READS ).snp.vcf --verbose --threshold 0.1;       
+for READS in $WORKDIR/data_preprocessing/Polio3/*.sort.bam; do
+    medaka consensus $READS --model r1041_e82_400bps_sup_v4.0.0 --threads 2 $(basename $READS).hdf;
+    medaka snp $REF3 $(basename $READS).hdf $(basename $READS).snp.vcf --verbose --threshold 0.1;       
 done
 
-# cat vcf_files.txt | while read line; do bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t%secondary_prob\n' $line  > vcf_files.txt; done 
+#### medaka haploid variant
 
-for READS in $PWD/*.snp.vcf; do
-    bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t%secondary_prob\n' $READS > $(basename $READS ).txt
+for READS in $WORKDIR/fastq_barcode_merged/run_polio1/*.sort.bam; do
+    medaka_haploid_variant -i $READS -r $REF -o $(basename $READS) -f -x
+done
+### 2nd run with corrected bed file
+for READS in $WORKDIR/data_preprocessing/Polio1/*.sort.bam; do
+    medaka_haploid_variant -i $READS -r $REF -o $(basename $READS) -f -x
+done
+cd ..
+cd Polio2
+for READS in $WORKDIR/data_preprocessing/Polio2/*.sort.bam; do
+    medaka_haploid_variant -i $READS -r $REF2 -o $(basename $READS) -f -x
+done
+cd ..
+cd Polio3
+for READS in $WORKDIR/data_preprocessing/Polio3/*.sort.bam; do
+    medaka_haploid_variant -i $READS -r $REF3 -o $(basename $READS) -f -x
 done
 
-#medaka variant $REF $(basename $READS .output_consensus).hdf $(basename $READS ).variant.vcf; 
-# -m r1041_e82_260bps_sup_g632 --> doesnt work well
-# -m r1041_e82_260bps_sup_v4.0.0 --> works best
-# r1041_e82_260bps_sup_v4.1.0 --> works okay
-# r1041_e82_260bps_sup_variant_g632 --> doesnt work well
-# r1041_e82_260bps_sup_variant_v4.1.0 --> doesnt work well
+#### medaka variant -> already deprecated, better use clair3 
 ```
 ## Freebayes variant calling
 
@@ -128,17 +274,35 @@ done
 ## NanoCaller variant calling
 
 ```bash
-sudo chmod 666 /var/run/docker.sock
+#sudo chmod 666 /var/run/docker.sock
 
-docker run --rm -it -v $PWD:$PWD -w $PWD genomicslab/nanocaller:3.4.1 /bin/bash
+#docker run --rm -it -v $PWD:$PWD -w $PWD genomicslab/nanocaller:3.4.1 /bin/bash
 
-for READS in $PWD/samtools_ampliconclip_both_ends/*.sort.bam; do
-    NanoCaller --bam $READS --ref $PWD/Referenz_poliovirus_Sabin_1_converted.fasta --preset ont --mode snps --mincov 20 --min_allele_freq 0.1 --output $PWD/nanocaller_run_clipped_3.4.0 --prefix $(basename $READS)
+for READS in $WORKDIR/fastq_barcode_merged/run_polio1/*.sort.bam; do
+    NanoCaller --bam $READS --ref $REF --preset ont --mode snps --mincov 20 --min_allele_freq 0.1 --output $PWD/run_polio1 --prefix $(basename $READS)
 done
 
-for READS in $PWD/*.snps.vcf.gz; do
-    bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t%FQ\n' $READS > $(basename $READS ).txt
+for READS in $PWD/*.sort.bam; do
+    NanoCaller --bam $READS --ref $REF2 --preset ont --mode snps --mincov 20 --min_allele_freq 0.1 --output $PWD --prefix $(basename $READS).nanocaller
 done
+
+### 2nd run with corrected bed
+for READS in $WORKDIR/data_preprocessing/Polio1/*.sort.bam; do
+    NanoCaller --bam $READS --ref $REF --preset ont --mode snps --mincov 20 --min_allele_freq 0.1 --output $WORKDIR/variant_calling/nanocaller/Polio2 --prefix $(basename $READS).nanocaller
+done
+
+for READS in $WORKDIR/data_preprocessing/Polio2/*.sort.bam; do
+    NanoCaller --bam $READS --ref $REF2 --preset ont --mode snps --mincov 20 --min_allele_freq 0.1 --output $WORKDIR/variant_calling/nanocaller/Polio2 --prefix $(basename $READS).nanocaller
+done
+
+for READS in $WORKDIR/data_preprocessing/Polio3/*.sort.bam; do
+    NanoCaller --bam $READS --ref $REF3 --preset ont --mode snps --mincov 20 --min_allele_freq 0.1 --output $WORKDIR/variant_calling/nanocaller/Polio3 --prefix $(basename $READS).nanocaller
+done
+##################################################
+
+#for READS in $PWD/*.snps.vcf.gz; do
+#    bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t[ %DP]\t%FQ\n' $READS > $(basename $READS).txt
+#done
 
 for READS in $PWD/samtools_ampliconclip_both_ends/*.sort.bam; do
     NanoCaller --bam $READS --ref $PWD/Referenz_poliovirus_Sabin_1_converted.fasta --preset ont --mode snps --mincov 20 --min_allele_freq 0.1 --output $PWD/nanocaller_run_clipped_3.0.0 --prefix $(basename $READS)
@@ -170,24 +334,31 @@ done
 ## iVar variant calling
 
 ```bash
-for READS in $WORKDIR/samtools_ampliconclip_both_ends/*.sort.bam; do
-    samtools mpileup -aa -A -d 60000 -B -Q 0 $READS | ivar variants -p $(basename $READS) -q 20 -t 0.1 -r $REF -g $GFF -m 1000
+# 2nd run with corrected bed file
+wget -O genes.gff "https://www.ncbi.nlm.nih.gov/sviewer/viewer.cgi?db=nuccore&report=gff3&id=AY184219"
+for READS in  $WORKDIR/data_preprocessing/Polio1/*.sort.bam; do
+    samtools mpileup -aa -A -d 60000 -B -Q 0 $READS | ivar variants -p $(basename $READS) -q 20 -t 0.1 -r $REF -g genes.gff -m 1000
+done
+
+wget -O genes.gff "https://www.ncbi.nlm.nih.gov/sviewer/viewer.cgi?db=nuccore&report=gff3&id=AY184220"
+for READS in  $WORKDIR/data_preprocessing/Polio2/*.sort.bam; do
+    samtools mpileup -aa -A -d 60000 -B -Q 0 $READS | ivar variants -p $(basename $READS) -q 20 -t 0.1 -r $REF2 -g genes.gff -m 1000
+done
+
+wget -O genes.gff "https://www.ncbi.nlm.nih.gov/sviewer/viewer.cgi?db=nuccore&report=gff3&id=AY184221"
+for READS in  $WORKDIR/data_preprocessing/Polio3/*.sort.bam; do
+    samtools mpileup -aa -A -d 60000 -B -Q 0 $READS | ivar variants -p $(basename $READS) -q 20 -t 0.1 -r $REF3 -g genes.gff -m 1000
 done
 
 # convert ivar tsv to vcf 
 wget "https://github.com/jts/ncov-tools/blob/7a19778c644594fe17ce4fc703560e97b149aa60/workflow/scripts/ivar_variants_to_vcf.py"
-python ivar_variants_to_vcf.py /home/namuun/Documents/Polio_Nanopore_Analysis/ivar_run_clipped/SiB_151_152_23-0716_filtered.sorted.bam.clipped.sort.bam.tsv /home/namuun/Documents/Polio_Nanopore_Analysis/ivar_run_clipped/SiB_151_152_23-0716_filtered.sorted.bam.clipped.sort.bam.vcf
-
 
 for READS in $PWD/*.tsv; do
-    python ivar_variants_to_vcf.py $READS > $(basename $READS ).vcf
-done
-for READS in $PWD/*filtered.vcf; do
-    
+    python $WORKDIR/variant_calling/ivar/ivar_variants_to_vcf.py $READS $(basename $READS ).ivar.vcf
 done
 
 # remove multiallelic SNPs 
-for READS in $PWD/*.sort.bam.vcf; do
+for READS in $PWD/*.vcf; do
     bcftools view --max-alleles 2 --exclude-types indels $READS > $(basename $READS ).filtered.vcf
     bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t[%ALT_FREQ]\n' $(basename $READS ).filtered.vcf > $(basename $READS ).filtered.vcf.txt
 done
@@ -197,17 +368,19 @@ done
 
 ## Clair3 variant calling
 ```bash
-docker run --rm -it -v $PWD:$PWD -w $PWD hkubal/clair3:latest /bin/bash
+# docker run --rm -it -v $PWD:$PWD -w $PWD hkubal/clair3:latest /bin/bash
 
-for READS in $PWD/samtools_ampliconclip_both_ends/*.sort.bam; do
-    mkdir $PWD/clair3_run_clipped/$(basename $READS)_run16
+MODEL_PATH=/scratch/projekte/MF1_Bioinformatics/poliovirus-primer-evaluation/Nanopore_analysis/clai3_run/models/r1041_e82_400bps_sup_v420
+conda activate clair3
 
-    /opt/bin/run_clair3.sh \
+for READS in $WORKDIR/data_preprocessing/Polio1/*.sort.bam; do
+    mkdir $PWD/$(basename $READS)
+    run_clair3.sh \
     --bam_fn=$READS \
-    --ref_fn=/home/namuun/Documents/Polio_Nanopore_Analysis/Referenz_poliovirus_Sabin_1_converted.fasta\
+    --ref_fn=$REF\
     --threads=2 \
     --platform='ont' \
-    --model_path="/home/namuun/Documents/Polio_Nanopore_Analysis/rerio_clair3_models/rerio/clair3_models/r1041_e82_260bps_sup_v410" \
+    --model_path=$MODEL_PATH \
     --chunk_size=2500 \
     --include_all_ctgs \
     --min_coverage=20 \
@@ -215,169 +388,274 @@ for READS in $PWD/samtools_ampliconclip_both_ends/*.sort.bam; do
     --haploid_sensitive \
     --snp_min_af=0.1 \
     --call_snp_only \
-    --output=/home/namuun/Documents/Polio_Nanopore_Analysis/clair3_run_clipped/$(basename $READS)_run16 
+    --var_pct_full=1 \
+    --ref_pct_full=1 \
+    --output=$PWD/$(basename $READS) 
 done
+
+#### 2nd run with corrected bed file
+for READS in $WORKDIR/data_preprocessing/Polio1/*.sort.bam; do
+    #mkdir $PWD/$(basename $READS)
+    run_clair3.sh \
+    --bam_fn=$READS \
+    --ref_fn=$REF\
+    --threads=2 \
+    --platform='ont' \
+    --model_path=$MODEL_PATH \
+    --chunk_size=2500 \
+    --include_all_ctgs \
+    --min_coverage=20 \
+    --no_phasing_for_fa \
+    --haploid_sensitive \
+    --snp_min_af=0.1 \
+    --call_snp_only \
+    --var_pct_full=1 \
+    --ref_pct_full=1 \
+    --output=$PWD/$(basename $READS) 
+done
+
+for READS in $WORKDIR/data_preprocessing/Polio2/*.sort.bam; do
+    mkdir $PWD/$(basename $READS)
+    run_clair3.sh \
+    --bam_fn=$READS \
+    --ref_fn=$REF2\
+    --threads=2 \
+    --platform='ont' \
+    --model_path=$MODEL_PATH \
+    --chunk_size=2500 \
+    --include_all_ctgs \
+    --min_coverage=20 \
+    --no_phasing_for_fa \
+    --haploid_sensitive \
+    --snp_min_af=0.1 \
+    --call_snp_only \
+    --var_pct_full=1 \
+    --ref_pct_full=1 \
+    --output=$PWD/$(basename $READS) 
+done
+
+for READS in $WORKDIR/data_preprocessing/Polio3/*.sort.bam; do
+    mkdir $PWD/$(basename $READS)
+    run_clair3.sh \
+    --bam_fn=$READS \
+    --ref_fn=$REF3\
+    --threads=2 \
+    --platform='ont' \
+    --model_path=$MODEL_PATH \
+    --chunk_size=2500 \
+    --include_all_ctgs \
+    --min_coverage=20 \
+    --no_phasing_for_fa \
+    --haploid_sensitive \
+    --snp_min_af=0.1 \
+    --call_snp_only \
+    --var_pct_full=1 \
+    --ref_pct_full=1 \
+    --output=$PWD/$(basename $READS) 
+done
+
+
+find ./  -name "merge_output.vcf.gz" > vcf_files.txt
+cat vcf_files.txt | while read line; do 
+    bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t[ %DP]\t[ %AF]\n' $line >  $(dirname $line)/$(basename $line).txt 
+done
+
 ```
---min_coverage=20 --call_snp_only --indel_min_af=0.1 --haploid_precise
---chunk_size=1000 --include_all_ctgs --no_phasing_for_fa
-# model r941_prom_sup_g5014: empty vcf
-# model r941_prom_hac_g360+g422: empty vcf
-# model r941_prom_hac_g238: empty vcf
 
-/opt/bin/scripts/clair3_c_impl.sh --bam_fn /home/namuun/Documents/Polio_Nanopore_Analysis/samtools_ampliconclip_both_ends/SiB_151_152_23-0716_filtered.sorted.bam.clipped.sort.bam --ref_fn /home/namuun/Documents/Polio_Nanopore_Analysis/Referenz_poliovirus_Sabin_1_converted.fasta --threads 2 --model_path /home/namuun/Documents/Polio_Nanopore_Analysis/rerio_clair3_models/rerio/clair3_models/r1041_e82_260bps_sup_v410 --platform ont --output /home/namuun/Documents/Polio_Nanopore_Analysis/clair3_run_clipped/SiB_151_152_23-0716_filtered.sorted.bam.clipped.sort.bam_run5 --bed_fn=EMPTY --vcf_fn=EMPTY --ctg_name=EMPTY --sample_name=SAMPLE --chunk_num=0 --chunk_size=1000 --samtools=samtools --python=python3 --pypy=pypy3 --parallel=parallel --whatshap=whatshap --qual=2 --var_pct_full=0.7 --ref_pct_full=0.1 --var_pct_phasing=0.7 --snp_min_af=0.08 --indel_min_af=0.15 --min_mq=5 --min_coverage=20 --min_contig_size=0 --pileup_only=False --gvcf=False --fast_mode=False --call_snp_only=True --print_ref_calls=False --haploid_precise=False --haploid_sensitive=False --include_all_ctgs=True --no_phasing_for_fa=False --pileup_model_prefix=pileup --fa_model_prefix=full_alignment --remove_intermediate_dir=False --enable_phasing=False --enable_long_indel=False --keep_iupac_bases=False --use_gpu=False --longphase_for_phasing=False --longphase=EMPTY --use_whatshap_for_intermediate_phasing=True --use_longphase_for_intermediate_phasing=False --use_whatshap_for_final_output_phasing=False --use_longphase_for_final_output_phasing=False --use_whatshap_for_final_output_haplotagging=False
-
-### flye --nano-raw SiB_151_152_23-0716_filtered.fastq -o flye_output -t 8 --meta -g 7k
-
-# Annotation with SnpEff
-
+## create .tabular files for heatmap
 ```bash
-# retrieve genebank file for Polio 1
-# wget -O genes.gff "https://www.ncbi.nlm.nih.gov/sviewer/viewer.cgi?db=nuccore&report=gff3&id=AY184219"
-# gzip genes.gff
-# esearch -db nucleotide -query "AY184219.1" | efetch -format fasta > AY184219.1.fa
-
-# Building a database from GenBank files https://pcingola.github.io/SnpEff/se_build_db/#step-1-configure-a-new-genome
-#  https://www.ncbi.nlm.nih.gov/nuccore/AY184219.1
-# build database for SnpEff
-java -jar snpEff.jar build -genbank -v AY184219.1
-
-for READS in $PWD/*.snps.vcf; do
-    sed -i 's/AY184219/AY184219.1/' $READS
-done
-
-#freebayes
-mkdir SiB_151_152
-mkdir SiB_153_154
-cd SiB_15....
-java -Xmx8g -jar /home/namuun/Documents/Polio_Nanopore_Analysis/snpEff/snpEff.jar AY184219.1 -formatEff $WORKDIR/freebayes_run_clipped/SiB_151_152_23-0716_filtered.sorted.bam.clipped.sort.bam.vcf > SiB_151_152.ann.vcf
-
-java -Xmx8g -jar /home/namuun/snpEff/snpEff.jar AY184219.1 -formatEff $WORKDIR/freebayes_run_clipped/SiB_153_154_23-01717_filtered.sorted.bam.clipped.sort.bam.vcf > SiB_153_154.ann.vcf
-
-# medaka
-java -Xmx8g -jar /home/namuun/snpEff/snpEff.jar AY184219.1 -formatEff $WORKDIR/freebayes_run_clipped/SiB_153_154_23-01717_filtered.sorted.bam.clipped.sort.bam.snp.vcf > SiB_153_154.ann.vcf
-
-# nanocaller 
-gunzip *final.vcf.gz
-for READS in $PWD/*.final.vcf; do
-    sed -i 's/AY184219/AY184219.1/' $READS
-done
-## 3.4.0
-java -Xmx8g -jar /home/namuun/snpEff/snpEff.jar AY184219.1 -formatEff $WORKDIR/nanocaller_run_clipped_3.4.0_backup/SiB_153_154_23-01717_filtered.sorted.bam.clipped.sort.bam.unfiltered.snps.vcf.gz.final.vcf > SiB_153_154.ann.vcf
-## 3.0.0 
-java -Xmx8g -jar /home/namuun/snpEff/snpEff.jar AY184219.1 -formatEff $WORKDIR/nanocaller_run_clipped_3.0.0_copy/SiB_153_154_23-01717_filtered.sorted.bam.clipped.sort.bam.snps.vcf > SiB_153_154.ann.vcf
-
-# Illumina
-java -Xmx8g -jar /home/namuun/snpEff/snpEff.jar AY184219.1 -formatEff /home/namuun/Documents/CoVpipe_Polio/Illumina_complete_run3/results/03-Variant-Calling/SiB_147_148_S_6_7/SiB_147_148_S_6_7.vcf > SiB_151_152_Illumina_freebayes.ann.vcf  
-
-java -Xmx8g -jar /home/namuun/snpEff/snpEff.jar AY184219.1 -formatEff /home/namuun/Documents/CoVpipe_Polio/Illumina_complete_run3/results/03-Variant-Calling/SiB_149_150_S_8_9/SiB_149_150_S_8_9.vcf > SiB_153_154_Illumina_freebayes.ann.vcf
-
-# ivar
-java -Xmx8g -jar /home/namuun/Documents/Polio_Nanopore_Analysis/snpEff/snpEff.jar AY184219.1 -formatEff /home/namuun/Documents/Polio_Nanopore_Analysis/ivar_run_clipped/SiB_151_152_23-0716_filtered.sorted.bam.clipped.sort.bam.vcf.filtered.vcf > SiB_151_152_ivar.ann.vcf  
-
-java -Xmx8g -jar /home/namuun/Documents/Polio_Nanopore_Analysis/snpEff/snpEff.jar AY184219.1 -formatEff /home/namuun/Documents/Polio_Nanopore_Analysis/ivar_run_clipped/SiB_153_154_23-01717_filtered.sorted.bam.clipped.sort.bam.vcf.filtered.vcf > SiB_153_154_ivar.ann.vcf
-
-```
-# medaka
-bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t%FILTER\t%secondary_prob\t%EFF\n' 
-# freebayes
-bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t%FILTER\t%DP\t%AB\t%EFF\n'
-# nanocaller 
-bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t%FILTER\t[ %DP]\t%FQ\t%EFF\n'
-bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t%FILTER\t[ %DP]\t[ %FQ]\t%EFF\n' SiB_151_152.ann.vcf > SiB_151_152.ann.tabular
-# ivar
-for READS in $PWD/*.ann.vcf; do
-    bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t%FILTER\t%DP\t[%ALT_FREQ]\t%EFF\n' $READS > $(basename $READS).tabular
+for READS in $PWD/*.annotation.covered.af.vcf.gz; do
+    bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t%FILTER\t%DP\t%AF\n' $READS > $(basename $READS).tabular
     tr '|' '\t' < $(basename $READS).tabular > $(basename $READS).1.tabular
 done
-
-for READS in $PWD/*.ann.vcf; do
-    bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t%DP\t[%ALT_FREQ]\n' $READS
-done
+# covpipe *.annotation.covered.af.vcf.gz
+# nanopore *.ann.vcf
 
 
-##INFO=<ID=EFF,Number=.,Type=String,Description="Predicted effects for this variant.Format: 'Effect ( Effect_Impact | Functional_Class | Codon_Change | Amino_Acid_Change| Amino_Acid_length | Gene_Name | Transcript_BioType | Gene_Coding | Transcript_ID | Exon_Rank  | Genotype [ | ERRORS | WARNINGS ] )' ">
-
-CHROM	POS	REF	ALT	FILTER	DP	AF	EFF[*].EFFECT	EFF[*].IMPACT	EFF[*].FUNCLASS	EFF[*].AA	EFF[*].GENE
-
-find -name "*.tabular" > snpeff.tabular.txt
-
+# Prepare clair3 for HEATMAP 
+find -name "merge_output.vcf.gz" > vcf_files.txt
 while read line ; do
-    tr '|' '\t' < $WORKDIR/$line > $(basename $line).tab.tabular
-done < $WORKDIR/snpeff.tabular.txt
+    vcf_name=$(echo $(basename $(dirname $line)) | cut -d'.' -f1)
+    tab=".tabular"
+    tab2="_clair3"
 
-for READS in $PWD/*.tabular; do
-    sed -i '1s/^/CHROM  POS REF ALT FILTER  DP  AF  EFF[*].EFFECT   EFF[*].IMPACT   EFF[*].FUNCLASS EFF[*].AA   EFF[*].GENE\n/' $READS
-done
-<!-- java -jar snpEff.jar build -genbank -v AY184219.1
-00:00:00 SnpEff version SnpEff 5.1f (build 2023-07-21 13:58), by Pablo Cingolani
-00:00:00 Command: 'build'
-00:00:00 Building database for 'AY184219.1'
-00:00:00 Reading configuration file 'snpEff.config'. Genome: 'AY184219.1'
-00:00:00 Reading config file: /home/namuun/snpEff/snpEff.config
-00:00:00 done
-00:00:00 Chromosome: 'AY184219.1'       length: 7441
-00:00:00 Create exons from CDS (if needed): 
-............00:00:00 Exons created for 12 transcripts.
-00:00:00 Deleting redundant exons (if needed): 
-00:00:00        Total transcripts with deleted exons: 0
-00:00:00 Collapsing zero length introns (if needed): 
-00:00:00        Total collapsed transcripts: 0
-00:00:00                Adding genomic sequences to genes: 
-00:00:00        Done (1 sequences added).
-00:00:00                Adding genomic sequences to exons: 
-00:00:00        Done (12 sequences added, 0 ignored).
-00:00:00 Finishing up genome
-00:00:00 Adjusting transcripts: 
-00:00:00 Adjusting genes: 
-00:00:00 Adjusting chromosomes lengths: 
-00:00:00 Ranking exons: 
-00:00:00 Create UTRs from CDS (if needed): 
-00:00:00 Remove empty chromosomes: 
-00:00:00 Marking as 'coding' from CDS information: 
-00:00:00 Done: 0 transcripts marked
-00:00:00 
-00:00:00 Caracterizing exons by splicing (stage 1) : 
+    bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t[ %DP]\t[ %AF]\n' $line > "$vcf_name$tab"
+    tr '|' '\t' < "$vcf_name$tab" > "$vcf_name$tab2$tab"
+    sed -i '1s/^/CHROM\tPOS\tREF\tALT\tDP\tAF\n/' "$vcf_name$tab2$tab"
+done < $PWD/vcf_files.txt
 
-00:00:00 Caracterizing exons by splicing (stage 2) : 
-        00:00:00 done.
-00:00:00 [Optional] Rare amino acid annotations
-WARNING_FILE_NOT_FOUND: Rare Amino Acid analysis: Cannot read protein sequence file '/home/namuun/snpEff/./data/AY184219.1/protein.fa', nothing done.
-00:00:00 CDS check: GenBank file format, skipping
+# Prepare iVAR for HEATMAP 
+for line in $PWD/*.filtered.vcf; do
+    vcf_name=$(echo $(basename $line) | cut -d'.' -f1)
+    tab=".tabular"
+    tab2="_iVAR"
 
-00:00:00 Protein check file: '/home/namuun/snpEff/./data/AY184219.1/genes.gbk'
+    bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t%DP\t[%ALT_FREQ]\n' $line > "$vcf_name$tab"
+    tr '|' '\t' < "$vcf_name$tab" > "$vcf_name$tab2$tab"
+    sed -i '1s/^/CHROM\tPOS\tREF\tALT\tDP\tAF\n/' "$vcf_name$tab2$tab"
+done 
 
-00:00:00 Checking database using protein sequences
-00:00:00 Comparing Proteins...
-        Labels:
-                '+' : OK
-                '.' : Missing
-                '*' : Error
-        ......+.....00:00:00 
+# Prepare medaka for HEATMAP 
+for line in $PWD/*snp.vcf; do
+    vcf_name=$(echo $(basename $line) | cut -d'.' -f1)
+    tab=".tabular"
+    tab2="_medaka_snp"
 
-        Protein check:  AY184219.1      OK: 1   Not found: 11   Errors: 0       Error percentage: 0.0%
-00:00:00 Saving database
-00:00:00 Saving sequences for small chromosmes to file '/home/namuun/snpEff/./data/AY184219.1/sequence.bin'
-00:00:00 [Optional] Reading regulation elements: GFF
-WARNING_FILE_NOT_FOUND: Cannot read optional regulation file '/home/namuun/snpEff/./data/AY184219.1/regulation.gff', nothing done.
-00:00:00 [Optional] Reading regulation elements: BED 
-00:00:00 Cannot find optional regulation dir '/home/namuun/snpEff/./data/AY184219.1/regulation.bed/', nothing done.
-00:00:00 [Optional] Reading motifs: GFF
-WARNING_FILE_NOT_FOUND: Cannot open PWMs file /home/namuun/snpEff/./data/AY184219.1/pwms.bin. Nothing done
-00:00:00 Done
-00:00:00 Logging
-00:00:01 Checking for updates...
-00:00:02 Done.
- -->
+    bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t[ %GQ]\t%primary_prob\n' $line > "$vcf_name$tab"
+    tr '|' '\t' < "$vcf_name$tab" > "$vcf_name$tab2$tab"
+    sed -i '1s/^/CHROM\tPOS\tREF\tALT\tDP\tAF\n/' "$vcf_name$tab2$tab"
+done 
 
- https://github.com/pcingola/SnpEff/issues/479
-https://github.com/pcingola/SnpEff/issues/455
- https://github.com/pcingola/SnpEff/issues/474
+# Prepare nanocaller for HEATMAP 
+for line in $PWD/*snps.vcf.gz; do
+    vcf_name=$(echo $(basename $line) | cut -d'.' -f1)
+    tab=".tabular"
+    tab2="_nanocaller"
 
+    bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t[ %DP]\t[ %FQ]\n' $line > "$vcf_name$tab"
+    tr '|' '\t' < "$vcf_name$tab" > "$vcf_name$tab2$tab"
+    sed -i '1s/^/CHROM\tPOS\tREF\tALT\tDP\tAF\n/' "$vcf_name$tab2$tab"
+done 
 
-## piranha
+# Prepare piranha-medaka_haploid_variant for HEATMAP -----> Whole Genome run with our own REF123.fasta
+#### WARNING -> for plotting purposes GQ and GT are taken as place holder for DP and AF.
+#### Medaka does not output DP and AF !!!
+for line in $PWD/barcode*/variant_calls/*.vcf; do
+    vcf_name=$(echo  $(dirname $line) | cut -d'/' -f9)
+    tab=".tabular"
+    tab2="_piranha_medaka_haploid_variant_"
+    tab3=$(basename $line)
+
+    bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t[ %GQ]\t[ %GT]\n' $line > "$vcf_name$tab"
+    tr '|' '\t' < "$vcf_name$tab" > "$vcf_name$tab2$tab3$tab"
+    sed -i '1s/^/CHROM\tPOS\tREF\tALT\tDP\tAF\n/' "$vcf_name$tab2$tab3$tab" 
+done 
+
+# Prepare Covpipe2-freebayes for HEATMAP
+for line in $PWD/results/03-Variant-Calling/SiB*/*.filtered.gt_adjust.filtered_indels.vcf.gz; do
+    vcf_name=$(echo  $(basename $line) | cut -d'.' -f1)
+    tab=".tabular"
+    tab2="_Illumina_freebayes"
+
+    bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t%DP\t%AF\n' $line > "$vcf_name$tab"
+    tr '|' '\t' < "$vcf_name$tab" > "$vcf_name$tab2$tab"
+    sed -i '1s/^/CHROM\tPOS\tREF\tALT\tDP\tAF\n/' "$vcf_name$tab2$tab"
+done 
+
+# Prepare Sanger vcf for HEATMAP 
+#### WARNING -> for plotting purposes DP and AF have placeholder values.
+for line in $PWD/*.fasta.vcf; do
+    vcf_name=$(echo $(basename $line) | cut -d'.' -f1)
+    tab=".tabular"
+    tab2="sanger"
+    tab3="_"
+    bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\n' $line > "$vcf_name$tab"
+    tr '|' '\t' < "$vcf_name$tab" > "$vcf_name$tab3$tab"
+    awk -F'\t' -vOFS='\t' '{ $6 = "1";  $5 = "100"; $1 = "AY184221" }1' < "$vcf_name$tab3$tab" > "$vcf_name$tab3$tab2$tab"
+    sed -i '1s/^/CHROM\tPOS\tREF\tALT\tDP\tAF\n/' "$vcf_name$tab3$tab2$tab"
+    rm "$vcf_name$tab" "$vcf_name$tab3$tab"
+done 
+```
+
+## Run Piranha
 
 ```bash
-piranha -i $FASTQ -b $PWD/barcodes.csv -r $REF -m wg --medaka-model r1041_e82_260bps_sup_v4.0.0
-piranha -i $FASTQ -b $PWD/barcodes.csv -m wg --medaka-model r1041_e82_260bps_sup_v4.0.0 --save-config
+FASTQPIRANHA=/scratch/projekte/MF1_Bioinformatics/poliovirus-primer-evaluation/data/2023-08-18-PolioPrimer-ONT-runID114/piranha_demultiplexed
+
+piranha -i $FASTQPIRANHA -b $PWD/barcodes.csv -r $REF -m wg --medaka-model r1041_e82_400bps_sup_v4.0.0 --min-read-length 600 --max-read-length 1000 -s environmental --min-read-depth 30 --save-config
+
+piranha -i $FASTQPIRANHA -b $PWD/barcodes.csv --analysis-mode wg --medaka-model r1041_e82_400bps_sup_v4.0.0 --min-read-length 600 --max-read-length 1000 -s environmental --no-temp --output-prefix analysis_with_phylo --save-config
+
+### Piranha run 08-11-2023
+piranha -i $FASTQPIRANHA -b $PWD/barcodes.csv -r $REF123 -m wg --medaka-model r1041_e82_400bps_sup_v4.0.0 --min-read-length 600 --max-read-length 1000 -s environmental --min-read-depth 30 --no-temp --output-prefix analysis_with_ref123 --save-config
+```
+
+## rename barcode files from Piranha
+```bash
+while IFS=, read col1 col2 ; do
+    tab_name=$(basename $col1"_piranha_medaka_haploid_variant_"*)
+    echo $tab_name
+    sib=$col2
+    echo "${sib}_piranha_medaka_haploid_variant.tabular"
+    #mv $tab_name $col2""
+    #rename 's/^barcode01/SiB155/' barcode19*
+done < barcodes.csv
+```
+
+# De Novo Assembly
+## Run Flye on read length filtered data
+```bash
+conda activate flye
+
+for READS in $WORKDIR/fastq_barcode_merged/run_polio3/*.filtered.fastq.gz; do
+    mkdir $PWD/$(basename $READS)
+    flye --nano-raw $READS -o $PWD/$(basename $READS) -t 8  --meta --min-overlap 1000 -g 7400
+done
+
+for READS in $WORKDIR/data_preprocessing/Polio3/*.filtered.fastq.gz; do
+    mkdir $PWD/$(basename $READS)
+    flye --nano-raw $READS -o $PWD/$(basename $READS) -t 8  --meta --min-overlap 1000 -g 7400
+done
+## get contig and contig sizes
+conda activate bioawk
+for READS in $PWD/20230403_1517_X5_FAU91805_e08a3e32_AS-28*/*contigs.fasta; do
+    echo $READS 
+    bioawk -c fastx '{ print $name, length($seq) }' < $READS 
+done > contig_sizes.txt
+
+## try de novo assembly with spades (made for illumina and not nanopore)
+spades.py --rnaviral -o polio2 -s $WORKDIR/fastq_barcode_merged/run_polio2/*.filtered.fastq.gz
+spades.py --rnaviral -o polio1 -s $WORKDIR/fastq_barcode_merged/run_polio1/20230403_1517_X5_FAU91805_e08a3e32_AS-2858_fastq_pass.filtered.fastq.gz
+
+# de novo assembly with canu
+conda activate canu
+
+for READS in $WORKDIR/fastq_barcode_merged/run_polio3/*.filtered.fastq.gz; do
+    canu -assemble -nanopore $READS -d $PWD/$(basename $READS) -p $(basename $READS) genomeSize=7.4k -corrected
+done
+```
+# Check for soft-clipped alignments
+```bash
+SAMDIR=$WORKDIR/fastq_barcode_merged/run_polio1
+for SAM in $SAMDIR/*.sam; do
+    python samclipy.py < $SAM > $SAMDIR/$(basename $SAM).softclip.filtered.sam 
+done > $SAMDIR/samclipy.log
+
+for READS in $SAMDIR/*.softclip.filtered.sam; do
+    samtools view -bS $READS | samtools sort - -@ 2 -o $SAMDIR/$(basename $READS).sorted.bam
+    samtools index $SAMDIR/$(basename $READS).sorted.bam
+done
+
+# get reads with H (hard-) or S (soft-) clip in region 5400-6000 ---> coverage drop in PV1
+samtools view -h 20230403_1517_X5_FAU91805_e08a3e32_AS-2864_fastq_pass.filtered.fastq.gz.sorted.bam "AY184219:5400-6000" | awk '$6 ~ /H/ || $1 ~ /^@/' | samtools view -bS - > 20230403_1517_X5_FAU91805_e08a3e32_AS-2864_fastq_pass.filtered.fastq.gz.sorted.bam_CIGAR_H-output.bam
+
+# get number of reads in bam/sam file
+samtools view -c 20230403_1517_X5_FAU91805_e08a3e32_AS-2871_fastq_pass.filtered.fastq.gz.sam
+# samtools view -h input.bam | awk '$6 !~ /S/ || $1 ~ /^@/' | samtools view -bS - > not-n-output.bam
+```
+
+# create consensus sequence -> did not work
+```bash
+# make primer fa file
+PRIMER_DIR=/scratch/projekte/MF1_Bioinformatics/poliovirus-primer-evaluation/primer/polio2
+while read line ; do
+    set $line 
+    echo ">$2"
+    echo ${4^^} 
+done < <(tail -n +2 $PWD/0_aligned_consensus_masked.fasta_900.primer.tsv) > primer.fa
+
+# run consensus
+gunzip $WORKDIR/data_preprocessing/Polio2/*.filtered.fastq.gz 
+for READS in $WORKDIR/data_preprocessing/Polio2/*.filtered.fastq; do
+    echo $READS 
+    NGSpeciesID --ont --consensus --racon --racon_iter 3 --fastq $READS --outfolder $PWD --primer_file $PRIMER_DIR/primer.fa
+done
+ 
+for file in *.fastq; do
+bn=`basename $file .fastq`
+NGSpeciesID --ont --consensus --sample_size 500 --m 800 --s 100 --medaka --primer_file primers.txt --fastq $file --outfolder ${bn}
+done
+gzip $WORKDIR/data_preprocessing/Polio2/*.filtered.fastq 
+
 
 ```
